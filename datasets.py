@@ -8,7 +8,7 @@ from sklearn.model_selection import KFold
 
 def create(name, rs_dir_path):
     if name == 'ml-100k':
-        d = MovieLens100k(rs_dir_path)
+        d = MovieLens100k()
         d.create()
 
 
@@ -62,9 +62,24 @@ class MovieLens100k(object):
             file.writelines(lines)
 
     def create_folds(self):
-        path = os.path.join(self.rs_dir_path, 'ratings.csv')
+        print('Creating folds ... ')
+        path = os.path.join(self.rs_dir_path, self.name, 'ratings.csv')
         df = pd.read_csv(path, sep=',')
+        df.to_csv()
         kf = KFold(n_splits=5, random_state=0, shuffle=True)
+        kf2 = KFold(n_splits=20)
+        for i, (train_full_idx, test_idx) in enumerate(kf.split(df)):
+            train_idx, valid_idx = next(kf2.split(train_full_idx))
+            df_train_full = df.iloc[train_full_idx, :]
+            df_test = df.iloc[test_idx, :]
+            df_train = df.iloc[train_idx, :]
+            df_valid = df.iloc[valid_idx, :]
+            df_train_full.to_csv(os.path.join(self.rs_dir_path, self.name, 'train_full_{}.csv'.format(i)), index=False,
+                                 mode='w+')
+            df_test.to_csv(os.path.join(self.rs_dir_path, self.name, 'test_{}.csv'.format(i)), index=False, mode='w+')
+            df_train.to_csv(os.path.join(self.rs_dir_path, self.name, 'train_{}.csv'.format(i)), index=False, mode='w+')
+            df_valid.to_csv(os.path.join(self.rs_dir_path, self.name, 'valid_{}.csv'.format(i)), index=False, mode='w+')
+            print('Finished creating fold {}'.format(i))
         return pd.read_csv(path, sep=',')
 
     def create_item_categories(self):
@@ -78,3 +93,8 @@ class MovieLens100k(object):
                 lines.append(line + '\n')
         with open(os.path.join(self.dir_path, 'item_cat_seq.csv'), 'w+') as file:
             file.writelines(lines)
+
+
+d = MovieLens100k()
+d.create_folds()
+
