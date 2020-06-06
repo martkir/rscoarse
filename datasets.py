@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 
-def create(name, rs_dir_path):
+def create(name):
     if name == 'ml-100k':
         d = MovieLens100k()
         d.create()
@@ -15,18 +15,15 @@ def create(name, rs_dir_path):
 class Data(object):
     def __init__(self, name):
         self.name = name
-        self.root_dir = 'data/rs_data'
-        if not os.path.isdir(self.root_dir):
-            os.makedirs(self.root_dir)
         try:
             present = set(next(os.walk('data/rs_data'))[1])  # e.g. ml-100k, ml-1m
         except StopIteration:
             present = set()
         if self.name not in present:
-            create(self.name, self.root_dir)
+            create(self.name)
 
-    def get_ratings(self):
-        path = 'data/rs_data/{}/ratings.csv'.format(self.name)
+    def get_ratings(self, which):
+        path = 'data/rs_data/{}/{}.csv'.format(self.name, which)
         return pd.read_csv(path, sep=',')
 
 
@@ -34,7 +31,7 @@ class MovieLens100k(object):
     def __init__(self):
         self.rs_dir_path = 'data/rs_dir'
         self.name = 'ml-100k'
-        self.dir_path = os.path.join(self.rs_dir_path, 'ml-100k')
+        self.rs_dir_path = os.path.join(self.rs_dir_path, 'ml-100k')
         self.raw_data_path = os.path.join('data/raw_data', 'ml-100k.zip')
         self.download_url = 'http://files.grouplens.org/datasets/movielens/ml-100k.zip'
 
@@ -44,8 +41,8 @@ class MovieLens100k(object):
             url=self.download_url,
             out=self.raw_data_path
         )
-        if not os.path.isdir(self.dir_path):
-            os.makedirs(self.dir_path)
+        if not os.path.isdir(self.rs_dir_path):
+            os.makedirs(self.rs_dir_path)
         self.create_ratings()
         self.create_folds()
         self.create_item_categories()
@@ -58,7 +55,7 @@ class MovieLens100k(object):
                 record = line.decode('utf-8').strip('\n').split('\t')
                 line = ','.join(record) + '\n'
                 lines.append(line)
-        with open(os.path.join(self.dir_path, 'ratings.csv'), 'w+') as file:
+        with open(os.path.join(self.rs_dir_path, 'ratings.csv'), 'w+') as file:
             file.writelines(lines)
 
     def create_folds(self):
@@ -91,10 +88,5 @@ class MovieLens100k(object):
                 genres = [int(record[i]) for i in range(5, len(record))]
                 line = '{},"{}"'.format(item_id, json.dumps(genres))
                 lines.append(line + '\n')
-        with open(os.path.join(self.dir_path, 'item_cat_seq.csv'), 'w+') as file:
+        with open(os.path.join(self.rs_dir_path, 'item_cat_seq.csv'), 'w+') as file:
             file.writelines(lines)
-
-
-d = MovieLens100k()
-d.create_folds()
-
