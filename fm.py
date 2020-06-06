@@ -265,14 +265,6 @@ class Tester(object):
         self.batch_size = batch_size
         self.device = device
 
-    def reset_sampler(self):
-        self.sampler = UserItemSampler(
-            rels=self.partition.valid.obs,
-            user_ids=self.partition.train.user_ids,
-            item_ids=self.partition.train.item_ids,
-            device=self.device
-        )
-
     @staticmethod
     def _valid_iter(model, batch):
         model.eval()
@@ -280,6 +272,14 @@ class Tester(object):
         scores = model.forward(**forward_params)
         output = model.stat_computer.compute_test_stats(scores, targets)
         return output
+
+    def reset_sampler(self):
+        self.sampler = UserItemSampler(
+            rels=self.partition.valid.obs,
+            user_ids=self.partition.train.user_ids,
+            item_ids=self.partition.train.item_ids,
+            device=self.device
+        )
 
     def __call__(self, model, current_epoch):
         batch_stats = defaultdict(lambda: [])
@@ -303,8 +303,9 @@ class Tester(object):
 
 
 class Trainer(object):
-    def __init__(self, sampler, device):
-        self.sampler = sampler
+    def __init__(self, partition, batch_size, device):
+        self.partition = partition
+        self.batch_size = batch_size
         self.device = device
 
     @staticmethod
@@ -321,12 +322,21 @@ class Trainer(object):
 
         return output, model, optimizer
 
+    def reset_sampler(self):
+        self.sampler = UserItemSampler(
+            rels=self.partition.train.obs,
+            user_ids=self.partition.train.user_ids,
+            item_ids=self.partition.train.item_ids,
+            device=self.device
+        )
+
     def __call__(self, model, optimizer, current_epoch):
         batch_stats = defaultdict(lambda: [])
         epoch_stats = OrderedDict({})
+        self.reset_sampler()
 
         with tqdm(total=len(self.sampler)) as pbar_train:
-            for i, batch in enumerate(self.sampler):
+            for i, batch in enumerate(self.sampler.batch(self.batch_size)):
                 output, model, optimizer = self._train_iter(batch, model, optimizer)
 
                 for k, v in output.items():
