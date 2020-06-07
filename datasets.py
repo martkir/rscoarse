@@ -26,10 +26,15 @@ class Data(object):
         path = 'data/rs_data/{}/{}.csv'.format(self.name, which)
         return pd.read_csv(path, sep=',')
 
+    def get_num_categories(self):
+        df = pd.read_csv('data/rs_data/{}/item_cat_seq.csv'.format(self.name))
+        item_cat_seq_0 = json.loads(df['item_cat_seq'][0])
+        return len(item_cat_seq_0)
+
 
 class MovieLens100k(object):
     def __init__(self):
-        self.root = 'data/rs_dir'
+        self.root = 'data/rs_data'
         self.name = 'ml-100k'
         self.rs_dir_path = os.path.join(self.root, 'ml-100k')
         self.raw_data_path = os.path.join('data/raw_data', 'ml-100k.zip')
@@ -85,8 +90,9 @@ class MovieLens100k(object):
             for line in archive.open('ml-100k/u.item'):
                 record = line.decode('iso-8859-1').strip('\n').split('|')
                 item_id = int(record[0])
-                genres = [int(record[i]) for i in range(5, len(record))]
+                genres = [int(record[i]) for i in range(5, len(record))]  # the last 19 fields are the genres
                 line = '{},"{}"'.format(item_id, json.dumps(genres))
                 lines.append(line + '\n')
         with open(os.path.join(self.rs_dir_path, 'item_cat_seq.csv'), 'w+') as file:
             file.writelines(lines)
+
