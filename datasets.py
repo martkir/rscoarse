@@ -29,9 +29,9 @@ class Data(object):
 
 class MovieLens100k(object):
     def __init__(self):
-        self.rs_dir_path = 'data/rs_dir'
+        self.root = 'data/rs_dir'
         self.name = 'ml-100k'
-        self.rs_dir_path = os.path.join(self.rs_dir_path, 'ml-100k')
+        self.rs_dir_path = os.path.join(self.root, 'ml-100k')
         self.raw_data_path = os.path.join('data/raw_data', 'ml-100k.zip')
         self.download_url = 'http://files.grouplens.org/datasets/movielens/ml-100k.zip'
 
@@ -60,7 +60,7 @@ class MovieLens100k(object):
 
     def create_folds(self):
         print('Creating folds ... ')
-        path = os.path.join(self.rs_dir_path, self.name, 'ratings.csv')
+        path = os.path.join(self.rs_dir_path, 'ratings.csv')
         df = pd.read_csv(path, sep=',')
         df.to_csv()
         kf = KFold(n_splits=5, random_state=0, shuffle=True)
@@ -71,11 +71,11 @@ class MovieLens100k(object):
             df_test = df.iloc[test_idx, :]
             df_train = df.iloc[train_idx, :]
             df_valid = df.iloc[valid_idx, :]
-            df_train_full.to_csv(os.path.join(self.rs_dir_path, self.name, 'train_full_{}.csv'.format(i)), index=False,
+            df_train_full.to_csv(os.path.join(self.rs_dir_path, 'train_full_{}.csv'.format(i)), index=False,
                                  mode='w+')
-            df_test.to_csv(os.path.join(self.rs_dir_path, self.name, 'test_{}.csv'.format(i)), index=False, mode='w+')
-            df_train.to_csv(os.path.join(self.rs_dir_path, self.name, 'train_{}.csv'.format(i)), index=False, mode='w+')
-            df_valid.to_csv(os.path.join(self.rs_dir_path, self.name, 'valid_{}.csv'.format(i)), index=False, mode='w+')
+            df_test.to_csv(os.path.join(self.rs_dir_path, 'test_{}.csv'.format(i)), index=False, mode='w+')
+            df_train.to_csv(os.path.join(self.rs_dir_path, 'train_{}.csv'.format(i)), index=False, mode='w+')
+            df_valid.to_csv(os.path.join(self.rs_dir_path, 'valid_{}.csv'.format(i)), index=False, mode='w+')
             print('Finished creating fold {}'.format(i))
         return pd.read_csv(path, sep=',')
 
