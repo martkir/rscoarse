@@ -10,6 +10,8 @@ import click
 import datasets
 import random
 from torch import optim
+import pandas as pd
+import json
 
 
 def set_device(use_gpu):
@@ -219,13 +221,14 @@ class ExperimentIO(object):
 
 
 class UserItemSampler(object):
-    def __init__(self, rels, user_ids, item_ids, device):
+    def __init__(self, rels, user_ids, item_ids, device, use_content, item_cat_seq_path):
         self.obs = iter(rels)
 
         self.user_ids = user_ids
         self.item_ids = item_ids
+        self.use_content = use_content
+        self.item_cat_seq_path = item_cat_seq_path
         self.device = device
-
         self.uid2idx = {user_id: i for i, user_id in enumerate(self.user_ids)}
         self.xid2idx = {item_id: i for i, item_id in enumerate(self.item_ids)}
         self.num_users = len(self.user_ids)
@@ -233,9 +236,21 @@ class UserItemSampler(object):
         self._size = len(rels)
         self.user_matrix = torch.eye(self.num_users).to(device=self.device)
         self.item_matrix = torch.eye(self.num_items).to(device=self.device)
+        self.item_cat_dict = self.create_item_cat_dict()
 
     def __len__(self):
         return self._size
+
+    def create_item_cat_dict(self):
+        df = pd.read_csv(self.item_cat_seq_path)
+        records = df.to_dict('records')
+        out = {}
+        for i in range(len(records)):
+            item_id = records[i]['item_id']
+            item_cat_seq_json = records[i]['item_cat_seq']
+            item_cat_vec = torch.tensor(json.loads(item_cat_seq_json)).reshape(1, -1)
+            out[item_id] = item_cat_vec.float().to(device=self.device)
+        return out
 
     def batch(self, batch_size=1):
 
@@ -249,6 +264,8 @@ class UserItemSampler(object):
                     user_id, item_id, rel = next(self.obs)
                     user_vec = self.user_matrix[self.uid2idx[user_id]].reshape(1, self.user_matrix.shape[1])
                     item_vec = self.item_matrix[self.xid2idx[item_id]].reshape(1, self.item_matrix.shape[1])
+                    if self.use_content:
+                        item_vec = torch.cat([item_vec, self.item_cat_dict[user_id]], dim=1)
                     u.append(user_vec)
                     x.append(item_vec)
                     targets.append(torch.tensor(rel, dtype=torch.long).reshape(1, 1))
@@ -260,27 +277,18 @@ class UserItemSampler(object):
                 x = torch.cat(x, dim=0)
                 targets = torch.cat(targets, dim=0).to(device=self.device)
                 batch = (x, u, targets)
-                # targets shape (b, 1).
-
-                """
-                todo: in this format: plus allow content to be sampled!
-                
-                x = torch.cat(items, dim=0)
-                y = torch.cat(ratings, dim=0)
-                u = torch.cat(u_list, dim=0)
-                batch_new = (x, u, y)
-                """
-
                 yield batch
             else:
                 break
 
 
 class Tester(object):
-    def __init__(self, partition, batch_size, device):
+    def __init__(self, partition, batch_size, device, use_content, item_cat_seq_path):
         self.partition = partition
         self.batch_size = batch_size
         self.device = device
+        self.use_content = use_content
+        self.item_cat_seq_path = item_cat_seq_path
 
     @staticmethod
     def _valid_iter(model, batch):
@@ -295,7 +303,9 @@ class Tester(object):
             rels=self.partition.valid.obs,
             user_ids=self.partition.train.user_ids,
             item_ids=self.partition.train.item_ids,
-            device=self.device
+            device=self.device,
+            use_content=self.use_content,
+            item_cat_seq_path=self.item_cat_seq_path
         )
 
     def __call__(self, model, current_epoch):
@@ -320,10 +330,12 @@ class Tester(object):
 
 
 class Trainer(object):
-    def __init__(self, partition, batch_size, device):
+    def __init__(self, partition, batch_size, device, use_content, item_cat_seq_path):
         self.partition = partition
         self.batch_size = batch_size
         self.device = device
+        self.use_content = use_content
+        self.item_cat_seq_path = item_cat_seq_path
 
     @staticmethod
     def _train_iter(batch, model, optimizer):
@@ -344,7 +356,9 @@ class Trainer(object):
             rels=self.partition.train.obs,
             user_ids=self.partition.train.user_ids,
             item_ids=self.partition.train.item_ids,
-            device=self.device
+            device=self.device,
+            use_content=self.use_content,
+            item_cat_seq_path=self.item_cat_seq_path
         )
 
     def __call__(self, model, optimizer, current_epoch):
@@ -372,7 +386,8 @@ class Trainer(object):
 
 class Experiment(object):
 
-    def __init__(self, data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, use_gpu):
+    def __init__(self, data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content,
+                 item_cat_seq_path, use_gpu):
 
         """Performs a training and validation experiment.
 
@@ -394,6 +409,7 @@ class Experiment(object):
         self.lr = lr
         self.n_factors = n_factors
         self.use_content = use_content
+        self.item_cat_seq_path = item_cat_seq_path
         self.use_gpu = use_gpu
         self.device = set_device(self.use_gpu)
 
@@ -402,8 +418,8 @@ class Experiment(object):
         valid_obs = parse(self.data.get_ratings(valid_name))
         self.partition = Partition(train_obs, valid_obs)
 
-        self.trainer = Trainer(self.partition, self.batch_size, self.device)
-        self.tester = Tester(self.partition, self.batch_size, self.device)
+        self.trainer = Trainer(self.partition, self.batch_size, self.device, self.use_content, self.item_cat_seq_path)
+        self.tester = Tester(self.partition, self.batch_size, self.device, self.use_content, self.item_cat_seq_path)
 
         self.model = FMBaseline(
             x_dim=self.get_item_num_features(),
@@ -450,16 +466,17 @@ class Experiment(object):
 
 
 class Subset(object):
-    # data needed to sample.
     def __init__(self):
-        self.user_ids = set()
-        self.item_ids = set()
+        self.user_ids = []
+        self.item_ids = []
         self.obs = []
 
     def add(self, user_id, item_id, rating):
         self.obs.append((user_id, item_id, rating))
-        self.user_ids.add(user_id)
-        self.item_ids.add(item_id)
+        if user_id not in self.user_ids:
+            self.user_ids.append(user_id)
+        if item_id not in self.item_ids:
+            self.item_ids.append(item_id)
 
 
 class Partition(object):
@@ -493,9 +510,11 @@ def parse(df_ratings):
 @click.option('--num_epochs', type=int, default=10)
 @click.option('--lr', type=float, default=0.01)
 @click.option('--n_factors', type=int, default=4)
-@click.option('--use_content', type=bool, default=False)
+@click.option('--use_content', type=bool, default=True)
+@click.option('--item_cat_seq_path', type=str, default='data/rs_data/ml-100k/item_cat_seq.csv')
 @click.option('--use_gpu', type=bool, default=True)
-def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, use_gpu):
+def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, item_cat_seq_path,
+         use_gpu):
     e = Experiment(
         data_name=data_name,
         train_name=train_name,
@@ -505,9 +524,11 @@ def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factor
         lr=lr,
         n_factors=n_factors,
         use_content=use_content,
+        item_cat_seq_path=item_cat_seq_path,
         use_gpu=use_gpu,
     )
     e.run()
+    # todo: some items are not in training set -> item_vec_len < 1701.
 
 
 if __name__ == '__main__':
