@@ -8,6 +8,22 @@ from collections import defaultdict
 import torch
 import click
 import datasets
+import random
+from torch import optim
+
+
+def set_device(use_gpu):
+    device = torch.device('cpu')
+    if use_gpu:
+        if not torch.cuda.is_available():
+            raise Exception('CUDA capable GPU not available.')
+        else:
+            device = torch.device('cuda:{}'.format(0))
+    try:
+        print('Job initialized with device {}'.format(torch.cuda.get_device_name(device)))
+    except (AssertionError, ValueError):
+        print('Job initialized with CPU.')
+    return device
 
 
 class StatComputer(object):
@@ -79,7 +95,7 @@ class PairwiseDotProduct(nn.Module):
 
 class FMBaseline(nn.Module):
 
-    def __init__(self, x_dim, u_dim, n_factors, device, eval_acc=True):
+    def __init__(self, x_dim, u_dim, n_factors, device):
         super(FMBaseline, self).__init__()
         self.x_dim = x_dim
         self.u_dim = u_dim
@@ -98,7 +114,7 @@ class FMBaseline(nn.Module):
             'n_factors': n_factors,
             'device': device
         }
-        self.stat_computer = StatComputer(loss_type='mse', eval_acc=eval_acc)
+        self.stat_computer = StatComputer(loss_type='mse', eval_acc=False)
 
     def forward(self, x, u):
         scores_lin = self.linear(x)  # (b, 1).
@@ -243,7 +259,8 @@ class UserItemSampler(object):
                 u = torch.cat(u, dim=0)
                 x = torch.cat(x, dim=0)
                 targets = torch.cat(targets, dim=0).to(device=self.device)
-                batch = (x, u, targets.flatten())
+                batch = (x, u, targets)
+                # targets shape (b, 1).
 
                 """
                 todo: in this format: plus allow content to be sampled!
@@ -293,7 +310,7 @@ class Tester(object):
                     batch_stats[k].append(output[k])
                 description = 'epoch: {} '.format(current_epoch) + \
                               ' '.join(["{}: {:.4f}".format(k, np.mean(v)) for k, v in batch_stats.items()])
-                pbar.update(1)
+                pbar.update(batch[0].shape[0])
                 pbar.set_description(description)
 
         for k, v in batch_stats.items():
@@ -344,7 +361,7 @@ class Trainer(object):
                 description = \
                     'epoch: {} '.format(current_epoch) + \
                     ' '.join(["{}: {:.4f}".format(k, np.mean(v)) for k, v in batch_stats.items()])
-                pbar_train.update(1)
+                pbar_train.update(batch[0].shape[0])
                 pbar_train.set_description(description)
 
         for k, v in batch_stats.items():
@@ -355,15 +372,7 @@ class Trainer(object):
 
 class Experiment(object):
 
-    def __init__(self,
-                 model,
-                 model_params,
-                 optimizer,
-                 num_epochs,
-                 trainer,
-                 tester,
-                 experiment_dir,
-                 use_gpu=True):
+    def __init__(self, data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, use_gpu):
 
         """Performs a training and validation experiment.
 
@@ -377,34 +386,49 @@ class Experiment(object):
             experiment_dir: This directory contains the checkpoints and the results of an experiment.
         """
 
-        self.model = model
-        self.model_params = model_params
-        self.optimizer = optimizer
-        self.experiment_dirname = experiment_dir
+        self.data_name = data_name
+        self.train_name = train_name
+        self.valid_name = valid_name
+        self.batch_size = batch_size
         self.num_epochs = num_epochs
-        self.trainer = trainer
-        self.tester = tester
+        self.lr = lr
+        self.n_factors = n_factors
+        self.use_content = use_content
+        self.use_gpu = use_gpu
+        self.device = set_device(self.use_gpu)
 
-        data = datasets.Data(data_name)
-        train_obs = parse(data.get_ratings(train_name))  # [(user_id, item_id, rating)]
-        valid_obs = parse(data.get_ratings(valid_name))
-        partition = Partition(train_obs, valid_obs)
+        self.data = datasets.Data(data_name)
+        train_obs = parse(self.data.get_ratings(train_name))  # [(user_id, item_id, rating)]
+        valid_obs = parse(self.data.get_ratings(valid_name))
+        self.partition = Partition(train_obs, valid_obs)
 
+        self.trainer = Trainer(self.partition, self.batch_size, self.device)
+        self.tester = Tester(self.partition, self.batch_size, self.device)
 
-        self.results_path = os.path.join(experiment_dir, 'results.txt')
-        self.checkpoints_dir = os.path.join(experiment_dir, 'checkpoints')
-        self.device = torch.device('cpu')  # default device is cpu.
+        self.model = FMBaseline(
+            x_dim=self.get_item_num_features(),
+            u_dim=len(self.partition.train.user_ids),
+            n_factors=self.n_factors,
+            device=self.device
+        )
 
-        device_name = 'cpu'
-        if use_gpu:
-            if not torch.cuda.is_available():
-                print("GPU IS NOT AVAILABLE")
-            else:
-                self.device = torch.device('cuda:{}'.format(0))
-                device_name = torch.cuda.get_device_name(self.device)
-                self.model.to(device=self.device)
+        self.model.to(device=self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
-        print('initialized experiment with device: {}'.format(device_name))
+        # todo: model_params.
+        # todo: sampling with content.
+        self.job_id = random.randint(0, 1000000)
+        self.job_dir = os.path.join('training', 'fm_{}'.format(self.job_id))
+        self.results_path = os.path.join(self.job_dir, 'results.txt')
+        self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
+        os.makedirs(self.checkpoints_dir, exist_ok=False)
+        print('job_id: {}'.format(self.job_id))
+
+    def get_item_num_features(self):
+        if self.use_content:
+            return len(self.partition.train.item_ids) + self.data.get_num_categories()
+        else:
+            return len(self.partition.train.item_ids)
 
     def run(self):
         for current_epoch in range(self.num_epochs):
@@ -458,46 +482,32 @@ def parse(df_ratings):
         obs.append((record['user_id'], record['item_id'], record['rating']))
     return obs
 
+# @click.option('--use_content', type=bool, default=False)
+# @click.option('--use_gpu', type=bool, default=True)
 
 @click.command()
-@click.option('--train', is_flag=True)
 @click.option('--data_name', type=str, default='ml-100k')
 @click.option('--train_name', type=str, default='train_0')
-@click.option('--valid_name', typ=str, default='valid_0')
+@click.option('--valid_name', type=str, default='valid_0')
 @click.option('--batch_size', type=int, default=256)
-def main(train, data_name, train_name, valid_name, batch_size):
-    if train:
-        data = datasets.Data(data_name)
-        train_obs = parse(data.get_ratings(train_name))  # [(user_id, item_id, rating)]
-        valid_obs = parse(data.get_ratings(valid_name))
-        partition = Partition(train_obs, valid_obs)
-
-        train_sampler = UserItemSampler(
-            rels=train_obs,
-            user_ids=None,
-            item_ids=None,
-            device=None
-        )
-
-        train_sampler = Sampler(train_dp, config['batch_size'])
-        test_sampler = Sampler(test_dp, config['batch_size'])
-
-        trainer = Trainer(train_sampler, device=torch.device(0))
-        tester = Tester(test_sampler, device=torch.device(0))
-
-        model_params = {
-            'x_dim': train_dp.item_num_features,
-            'u_dim': train_dp.num_users,
-            'n_factors': config['n_factors'],
-            'device': torch.device(0),
-            'eval_acc': config['eval_acc']
-        }
-
-        model = FMBaseline(**model_params)
-        e = Experiment(
-            model=model,
-            model_params=model_params,
-        )
+@click.option('--num_epochs', type=int, default=10)
+@click.option('--lr', type=float, default=0.01)
+@click.option('--n_factors', type=int, default=4)
+@click.option('--use_content', type=bool, default=False)
+@click.option('--use_gpu', type=bool, default=True)
+def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, use_gpu):
+    e = Experiment(
+        data_name=data_name,
+        train_name=train_name,
+        valid_name=valid_name,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        n_factors=n_factors,
+        use_content=use_content,
+        use_gpu=use_gpu,
+    )
+    e.run()
 
 
 if __name__ == '__main__':
