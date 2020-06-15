@@ -265,7 +265,7 @@ class UserItemSampler(object):
                     user_vec = self.user_matrix[self.uid2idx[user_id]].reshape(1, self.user_matrix.shape[1])
                     item_vec = self.item_matrix[self.xid2idx[item_id]].reshape(1, self.item_matrix.shape[1])
                     if self.use_content:
-                        item_vec = torch.cat([item_vec, self.item_cat_dict[user_id]], dim=1)
+                        item_vec = torch.cat([item_vec, self.item_cat_dict[item_id]], dim=1)
                     u.append(user_vec)
                     x.append(item_vec)
                     targets.append(torch.tensor(rel, dtype=torch.long).reshape(1, 1))
@@ -387,7 +387,7 @@ class Trainer(object):
 class Experiment(object):
 
     def __init__(self, data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content,
-                 item_cat_seq_path, use_gpu):
+                 item_cat_seq_path, use_gpu, job_dir):
 
         """Performs a training and validation experiment.
 
@@ -432,13 +432,11 @@ class Experiment(object):
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
         # todo: model_params.
-        # todo: sampling with content.
-        self.job_id = random.randint(0, 1000000)
-        self.job_dir = os.path.join('training', 'fm_{}'.format(self.job_id))
+
+        self.job_dir = job_dir
         self.results_path = os.path.join(self.job_dir, 'results.txt')
         self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
         os.makedirs(self.checkpoints_dir, exist_ok=False)
-        print('job_id: {}'.format(self.job_id))
 
     def get_item_num_features(self):
         if self.use_content:
@@ -499,8 +497,10 @@ def parse(df_ratings):
         obs.append((record['user_id'], record['item_id'], record['rating']))
     return obs
 
-# @click.option('--use_content', type=bool, default=False)
-# @click.option('--use_gpu', type=bool, default=True)
+
+job_id = random.randint(0, 1000000)
+print('job id: {}'.format(job_id))
+
 
 @click.command()
 @click.option('--data_name', type=str, default='ml-100k')
@@ -513,8 +513,10 @@ def parse(df_ratings):
 @click.option('--use_content', type=bool, default=True)
 @click.option('--item_cat_seq_path', type=str, default='data/rs_data/ml-100k/item_cat_seq.csv')
 @click.option('--use_gpu', type=bool, default=True)
+@click.option('--job_dir', type=str, default='training/fm_{}'.format(job_id))
 def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, item_cat_seq_path,
-         use_gpu):
+         use_gpu, job_dir):
+
     e = Experiment(
         data_name=data_name,
         train_name=train_name,
@@ -526,9 +528,9 @@ def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factor
         use_content=use_content,
         item_cat_seq_path=item_cat_seq_path,
         use_gpu=use_gpu,
+        job_dir=job_dir
     )
     e.run()
-    # todo: some items are not in training set -> item_vec_len < 1701.
 
 
 if __name__ == '__main__':
