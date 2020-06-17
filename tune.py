@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import time
 import random
+from tqdm import tqdm
 
 
 def run(cmd):
@@ -28,7 +29,7 @@ def get_tune_id():
 
 
 def default_search_space():
-    num_factors = [i * 4 for i in range(1, 16)]
+    num_factors = [i * 4 for i in range(1, 5)]
     num_factors = json.dumps(num_factors)
     return num_factors
 
@@ -40,25 +41,24 @@ tune_id = get_tune_id()
 @click.command()
 @click.option('--data_name', type=str, default='ml-100k')
 @click.option('--num_factors', type=str, default=num_factors)
-@click.option('--num_epochs', type=int, default=2)
-@click.option('--log', type=bool, default=False)
-@click.option('--num_cores', type=int, default=6)
-@click.option('--root_dir', type=str, default='training/tune_fm_{}'.format(tune_id))
-def main(data_name, num_factors, num_epochs, log, num_cores, root_dir):
+@click.option('--num_epochs', type=int, default=1)
+@click.option('--num_cores', type=int, default=2)
+def main(data_name, num_factors, num_epochs, num_cores):
     num_factors = json.loads(num_factors)
     cmds = []
     for i in range(len(num_factors)):
+        job_id = random.randint(0, 1000000)
+        job_dir = 'output/tune_{}/train_fm_{}'.format(tune_id, job_id)
         cmd = \
-            'python fm.py --data_name {} --n_factors {} --num_epochs {} --use_gpu {}'.format(data_name, num_factors[i],
-                                                                                             num_epochs, False)
+            'python fm.py --data_name {} --n_factors {} --num_epochs {} --use_gpu {} --job_dir {} --log False'.\
+                format(data_name, num_factors[i], num_epochs, False, job_dir)
         cmds.append((i, cmd))
 
-    p = mp.Pool(processes=num_cores)
-    p.map(run, cmds, chunksize=1)
-    p.close()
-    p.join()
-
-    # todo: change fm.py root_dir.
+    pool = mp.Pool(processes=num_cores)
+    for _ in tqdm(pool.imap_unordered(run, cmds), total=len(cmds)):
+        pass
+    pool.close()
+    pool.join()
 
     # """
     # table to create:

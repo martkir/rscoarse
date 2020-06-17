@@ -499,7 +499,6 @@ def parse(df_ratings):
 
 
 job_id = random.randint(0, 1000000)
-print('job id: {}'.format(job_id))
 
 
 @click.command()
@@ -513,10 +512,14 @@ print('job id: {}'.format(job_id))
 @click.option('--use_content', type=bool, default=True)
 @click.option('--item_cat_seq_path', type=str, default='data/rs_data/ml-100k/item_cat_seq.csv')
 @click.option('--use_gpu', type=bool, default=True)
-@click.option('--job_dir', type=str, default='training/fm_{}'.format(job_id))
+@click.option('--job_dir', type=str, default='output/train_fm_{}'.format(job_id))
+@click.option('--log', type=bool, default=True)
 def main(data_name, train_name, valid_name, batch_size, num_epochs, lr, n_factors, use_content, item_cat_seq_path,
-         use_gpu, job_dir):
-
+         use_gpu, job_dir, log):
+    if not log:
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+    print('job dir: ', job_dir)
     e = Experiment(
         data_name=data_name,
         train_name=train_name,
